@@ -1,0 +1,598 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="MAIN" Id="{cdeca52f-804a-4661-adfd-40a900c59ac8}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+ {attribute 'TcLinkTo':= 'TIID^Device 1 (EtherCAT)^Term 1 (EK1100)^Term 3 (EL1008)^Channel 4^Input'}
+	BpMarche AT %I*: BOOL;	
+
+
+
+
+	Etape: SINT;
+	PointsCam1: ARRAY [1..NbrePointCame] OF MC_MotionFunctionPoint;
+	PointsCam2: ARRAY [1..NbrePointCame] OF MC_MotionFunctionPoint;
+	MC_WriteMotionFunction1: MC_WriteMotionFunction;
+	CAM1: MC_CAM_REF;
+	CAM2: MC_CAM_REF;
+	MC_CamTableSelect1: MC_CamTableSelect;
+	MC_CamTableSelect2: MC_CamTableSelect;
+	Master : AXIS_REF;
+	Slave : AXIS_REF;
+	MC_PowerMaster: MC_Power;
+	bPowerMaster: BOOL;
+	MC_PowerSlave: MC_Power;
+	bPowerSlave: BOOL;
+	bStartAxis: BOOL;
+	MC_MoveVelocityMaster: MC_MoveVelocity;
+	VitesseMaster: LREAL := 100;
+	MC_CamInExt1: MC_CamIn;
+	bSynchroCam1: BOOL;
+	MC_CamIn1: MC_CamIn;
+	MC_CamInfo1: MC_CamInfo;
+	SyncCamOk: BOOL;
+	bReadInfoCam: BOOL;
+	bSynchroCam2: BOOL;
+	CamTableID: MC_CAM_ID;
+	bNewVelocity: BOOL;
+	bStopMaster: BOOL;
+	MC_Stop1: MC_Stop;
+	MC_CamOut1: MC_CamOut;
+	bDesynchro: BOOL;
+	MC_ResetMaster: MC_Reset;
+	bResetMaster: BOOL;
+	bModifOnLine: BOOL;
+	FB_SetCamOnlineChangeMode: MC_SetCamOnlineChangeMode;
+	eActivationMode: MC_CamActivationMode := MC_CAMACTIVATIONMODE.MC_CAMACTIVATION_INSTANTANEOUS;
+	FB_WriteMotionFunctionPoint: MC_WriteMotionFunctionPoint;
+	MCReadMotionFunction: MC_ReadMotionFunction;
+	vNumPointsRead: UDINT;
+	bReadMotionFunction: BOOL;
+
+	MCReadMotionFunctionPoint: MC_ReadMotionFunctionPoint;
+	bReadMotionFunctionPoint: BOOL;
+	vPoint: MC_MotionFunctionPoint;
+	MCReadMotionFunctionValues: MC_ReadMotionFunctionValues;
+	bReadMotionFunctionValues: BOOL;
+
+	MCReadCamTableSlaveDynamics: MC_ReadCamTableSlaveDynamics;
+	bReadCamTableSlaveDynamics: BOOL;
+	fSlavePosition: LREAL;
+	fSlaveVelocity: LREAL;
+	MCReadCamTableMasterPosition: MC_ReadCamTableMasterPosition;
+	bReadCamTableMasterPosition: BOOL;
+	pMasterLow: ST_CamMasterData;
+	pMasterHigh: ST_CamMasterData;
+	FB_ModuloEnc: FB_Modulo;
+	bNewModulo: BOOL;
+	newModulo: LREAL;
+	MC_GearInAV: MC_GearIn;
+	bGearIn: BOOL;
+	FB_Cam_ChgePoints1: FB_Cam_ChgePoints;
+	bChge: BOOL;
+	
+	CamIndex: UDINT;
+	bErrorChge: BOOL;
+	Index: UDINT;
+	
+	strLog:STRING:='Log';
+
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[Master.ReadStatus();
+Slave.ReadStatus();
+
+
+(*Projet CAM en PLC avec changement des points (lib MC2)- PH - 2014/10*)
+	A_Modulo();
+	
+	
+CASE Etape OF
+
+	0: (*INIT*)
+		A_PointsCame1_2();
+
+
+	1: (*Demarrage des Axes : MC_Power*)
+		IF bStartAxis THEN
+			strLog:='Start Process';
+			bStartAxis := FALSE;
+			bPowerMaster := bPowerSlave := TRUE;
+		END_IF
+
+		IF MC_PowerMaster.Error OR MC_PowerSlave.Error THEN
+			bPowerMaster := bPowerSlave := FALSE;
+			Etape := 100;
+		ELSIF MC_PowerMaster.Status AND MC_PowerSlave.Status THEN
+			strLog:='Axis Powered';
+			Etape := 2;
+		END_IF
+
+	2:(*Mise en vitesse du Maitre: MC_MoveVelocity*)
+		MC_MoveVelocityMaster.Execute := TRUE;
+		MC_MoveVelocityMaster.Velocity := VitesseMaster;
+		MC_MoveVelocityMaster.Direction := MC_Positive_Direction;
+
+
+		IF MC_MoveVelocityMaster.Error THEN
+			MC_MoveVelocityMaster.Execute := FALSE;
+			Etape := 100;
+		ELSIF MC_MoveVelocityMaster.InVelocity THEN
+			strLog:='Master InVelocity';
+			MC_MoveVelocityMaster.Execute := FALSE;
+			Etape := 3;
+		END_IF
+		MC_MoveVelocityMaster (Axis := Master);
+		
+	3:	(*Etape Attente*)
+		(*Choix de la CAM*)
+		IF bSynchroCam1 THEN
+			//A_ModifOnLine_1();
+			CamTableID := 1;
+			bSynchroCam1 := FALSE;
+			Etape := 4;
+			strLog:='Sync Cam 1';
+		END_IF
+
+		IF bSynchroCam2 THEN
+			CamTableID := 2;
+			bSynchroCam2 := FALSE;
+			Etape := 4;
+			strLog:='Sync Cam 2';
+		END_IF
+		
+		// sur un front on passe Online de la CAM 1 à la Cam 2
+		
+		IF bModifOnLine AND CamTableID=1 THEN
+			strLog:='Modif in line';
+			FB_SetCamOnlineChangeMode(Execute:= FALSE);
+			A_ModifOnLine();
+			bModifOnLine := FALSE;
+		END_IF
+
+		(*Désynchronisation*)
+		IF bDesynchro THEN
+			bDesynchro := FALSE;
+			strLog:='Desynchro';
+			Etape := 5;
+		END_IF
+
+		(*Changement de vitesse*)
+		IF bNewVelocity THEN
+			bNewVelocity := FALSE;
+			strLog:='New velocity';
+			Etape := 2;
+		END_IF
+
+		(*Stop Master*)
+		IF bStopMaster THEN
+			strLog:='Stop asked';
+			bStopMaster := FALSE;
+			Etape := 90;
+		END_IF
+
+	4: (*Mise en Synchro Esclave : MC_CamInExt*)
+
+		(*Vérification de la synchro pour mettre les bons paramètres*)
+		IF NOT SyncCamOk THEN
+			(*Pas de synchro en cours ->Premiere synchro instantanée*)
+			MC_CamInExt1.options.ActivationMode := MC_CAMACTIVATION_INSTANTANEOUS;
+		ELSE
+			(*Synchro déja en cours ->changement de CAM au prochain cycle *)
+			MC_CamInExt1.options.ActivationMode := MC_CAMACTIVATION_NEXTCYCLE;
+		END_IF
+
+		MC_CamInExt1.Execute := TRUE;
+		MC_CamInExt1.options.MasterScalingMode := MC_CAMSCALING_USERDEFINED;
+		MC_CamInExt1.options.SlaveScalingMode := MC_CAMSCALING_USERDEFINED;
+		MC_CamInExt1.options.ActivationPosition := 0;
+		MC_CamInExt1.MasterOffset := 0;
+		MC_CamInExt1.SlaveOffset := 0;
+		MC_CamInExt1.MasterScaling := 1.0;
+		MC_CamInExt1.SlaveScaling := 1.0;
+		MC_CamInExt1.StartMode := MC_STARTMODE_MASTERREL_SLAVEABS;
+		MC_CamInExt1.CamTableID := CamTableID;
+		MC_CamInExt1.options.InterpolationType := MC_InterpolationType_Linear;
+
+		IF MC_CamInExt1.Error THEN
+			MC_CamInExt1.Execute := FALSE;
+			Etape := 100;
+		ELSIF MC_CamInExt1.InSync THEN
+			MC_CamInExt1.Execute := FALSE;
+			SyncCamOk := TRUE;
+			Etape := 3;
+		END_IF
+		MC_CamInExt1(Master:=Master, Slave:=Slave);
+
+	5: (*Désynchronisation*)
+		MC_CamOut1.Execute := TRUE;
+		IF MC_CamOut1.Error THEN
+			MC_CamOut1.Execute := FALSE;
+		ELSIF MC_CamOut1.Done THEN
+			MC_CamOut1.Execute := FALSE;
+			SyncCamOk := FALSE;
+			Etape := 3;
+		END_IF
+		MC_CamOut1(Slave:=Slave);
+
+
+	90: (*Stop Master*)
+		MC_Stop1.Execute := TRUE;
+		IF MC_Stop1.Error THEN
+			MC_Stop1.Execute := FALSE;
+		ELSIF MC_Stop1.Done THEN
+			MC_Stop1.Execute := FALSE;
+			Etape := 3;
+			strLog:='Master stopped';
+		END_IF
+		MC_Stop1(Axis:=Master);
+
+	100: (*Erreur*)
+		SyncCamOk := FALSE;
+		MC_ResetMaster.Execute := bResetMaster;
+		IF MC_ResetMaster.Done THEN
+			bResetMaster := FALSE;
+			MC_ResetMaster.Execute := FALSE;
+			Etape := 0;
+		END_IF
+		MC_ResetMaster(Axis:=Master);
+
+END_CASE
+
+A_power();
+bReadInfoCam := NOT bReadInfoCam; (*Lecture chaque 2 cycles*)
+A_ReadMotion();
+
+
+
+FB_Cam_ChgePoints1(
+	bChange:=bChge , 
+	NumCAM_Index:= CamIndex, 
+	xError=>bErrorChge , 
+	xDone=> , 
+	PointsChge:=PointsCam1 );]]></ST>
+    </Implementation>
+    <Action Name="A_Couplage" Id="{e6b8fe53-1407-40bd-a905-22c22c8a4f49}">
+      <Implementation>
+        <ST><![CDATA[MC_GearInAV(
+	Master:= AxeTapis , 
+	Slave:= Master, 
+	Execute:= bGearIn, 
+	RatioNumerator:= , 
+	RatioDenominator:= , 
+	Acceleration:= , 
+	Deceleration:= , 
+	Jerk:= , 
+	BufferMode:= , 
+	Options:= , 
+	InGear=> , 
+	Busy=> , 
+	Active=> , 
+	CommandAborted=> , 
+	Error=> , 
+	ErrorID=> );
+	
+	]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ModifOnLine" Id="{5bf2dfd5-6f57-48e8-bd9b-526bb4b2318f}">
+      <Implementation>
+        <ST><![CDATA[// Nvelle Coordonnées	pour le point 3
+
+
+Index:= 3;
+
+FB_WriteMotionFunctionPoint(Execute:= FALSE, Point:= PointsCam1[Index]);
+FB_SetCamOnlineChangeMode(Execute:= FALSE);
+
+
+
+	
+PointsCam1[Index].PointIndex := 3;
+PointsCam1[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM3;
+PointsCam1[Index].PointType :=  MOTIONPOINTTYPE_REST;
+PointsCam1[Index].RelIndexNextPoint := 0;
+PointsCam1[Index].MasterPos := 150;
+PointsCam1[Index].SlavePos := 160;
+
+// ecriture du point	
+FB_WriteMotionFunctionPoint(
+		Execute:= TRUE , 
+		CamTableID:= 1, 
+		PointID:=Index , 
+		Done=> , 
+		Busy=> , 
+		Error=> , 
+		ErrorID=> , 
+		Point:= PointsCam1[Index]);
+// changement on ligne		
+FB_SetCamOnlineChangeMode(
+		Execute:= TRUE, 
+		ActivationMode:= eActivationMode , 
+		ActivationPosition:= master.NcToPlc.ModuloSetPos , // position du Master
+		MasterScalingMode:=1 , 
+		SlaveScalingMode:=1 , 
+		CamTableID:= 1, 
+		Done=> , 
+		Busy=> , 
+		Error=> , 
+		ErrorID=> );
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ModifOnLine_1" Id="{f725f50e-4bf5-4c91-8d24-925fa115873b}">
+      <Implementation>
+        <ST><![CDATA[FB_WriteMotionFunctionPoint(Execute:= FALSE, Point:= PointsCam1[3]);
+FB_SetCamOnlineChangeMode(Execute:= FALSE);
+
+// Nvelle Coordonnées		
+PointsCam1[3].PointIndex := 3;
+PointsCam1[3].FunctionType := MOTIONFUNCTYPE_POLYNOM3;
+PointsCam1[3].PointType :=  MOTIONPOINTTYPE_REST;
+PointsCam1[3].RelIndexNextPoint := 0;
+PointsCam1[3].MasterPos := 300;
+PointsCam1[3].SlavePos := 100;
+
+// ecriture du point	
+FB_WriteMotionFunctionPoint(
+		Execute:= TRUE , 
+		CamTableID:= 1, 
+		PointID:=3 , 
+		Done=> , 
+		Busy=> , 
+		Error=> , 
+		ErrorID=> , 
+		Point:= PointsCam1[3]);
+// changement on ligne		
+FB_SetCamOnlineChangeMode(
+		Execute:= TRUE, 
+		ActivationMode:= eActivationMode , 
+		ActivationPosition:= master.NcToPlc.ModuloSetPos , // position du Master
+		MasterScalingMode:=1 , 
+		SlaveScalingMode:=1 , 
+		CamTableID:= 1, 
+		Done=> , 
+		Busy=> , 
+		Error=> , 
+		ErrorID=> );
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_Modulo" Id="{fe0dc7b6-fe96-4485-8306-430f392eec49}">
+      <Implementation>
+        <ST><![CDATA[FB_ModuloEnc(
+	Execute:= bNewModulo, 
+	Modulo:=newModulo , 
+	Done=> , 
+	Busy=> , 
+	Error=> , 
+	ErrorId=> , 
+	Axe:=Master );]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_PointsCame1_2" Id="{915cc079-d7aa-457a-9ccf-b0ad4cf9a49b}">
+      <Implementation>
+        <ST><![CDATA[		(*Création de la CAME 1 : Type MC_CAM_REF*)
+		CAM1.pArray := ADR(PointsCam1);
+		CAM1.ArraySize := SIZEOF (PointsCam1);
+		CAM1.TableType := MC_TABLETYPE_MOTIONFUNCTION ;
+		CAM1.NoOfRows := 5;
+		CAM1.NoOfColumns := 1;
+
+		(*Création de la CAME 2 : Type MC_CAM_REF*)
+		CAM2.pArray := ADR(PointsCam2);
+		CAM2.ArraySize := SIZEOF (PointsCam2);
+		CAM2.TableType := MC_TABLETYPE_MOTIONFUNCTION ;
+		CAM2.NoOfRows := 5;
+		CAM2.NoOfColumns := 1;
+
+		(*Création des points : Type MC_MotionFunctionPoint*)
+		(*Premiere série de point*)
+		Index := 1;
+		PointsCam1[Index].PointIndex := 1;
+		PointsCam1[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM5_MM; //MOTIONFUNCTYPE_POLYNOM5_MM = Automatic
+		PointsCam1[Index].PointType :=  MOTIONPOINTTYPE_REST;
+		PointsCam1[Index].RelIndexNextPoint := 0;
+		PointsCam1[Index].MasterPos := 0;
+		PointsCam1[Index].SlavePos := 0;
+
+		Index := Index+1;	
+		
+		PointsCam1[Index].PointIndex := 2;
+		PointsCam1[Index].FunctionType :=MOTIONFUNCTYPE_POLYNOM5_MM;  //MOTIONFUNCTYPE_POLYNOM1 = Sync
+		PointsCam1[Index].PointType :=  MOTIONPOINTTYPE_VELOCITY;
+		PointsCam1[Index].SlaveVelo := 0.8;
+		PointsCam1[Index].RelIndexNextPoint := 0;
+		PointsCam1[Index].MasterPos := 90;
+		PointsCam1[Index].SlavePos := 100;
+		
+  		Index := Index+1;      
+		
+		PointsCam1[Index].PointIndex := 3;
+		PointsCam1[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM5_MM;
+		PointsCam1[Index].PointType :=  MOTIONPOINTTYPE_REST;
+		PointsCam1[Index].RelIndexNextPoint := 0;
+		PointsCam1[Index].MasterPos := 150;
+		PointsCam1[Index].SlavePos := 130;
+		
+   		Index := Index+1;     
+		
+		PointsCam1[Index].PointIndex := 4;
+		PointsCam1[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM5_MM;
+		PointsCam1[Index].PointType :=  MOTIONPOINTTYPE_REST;
+		PointsCam1[Index].RelIndexNextPoint := 0;
+		PointsCam1[Index].MasterPos := 300;
+		PointsCam1[Index].SlavePos := 130;
+		
+		Index := Index+1;	
+			
+		PointsCam1[Index].PointIndex := 5;
+		PointsCam1[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM3;
+		PointsCam1[Index].PointType :=  MOTIONPOINTTYPE_REST;
+		PointsCam1[Index].RelIndexNextPoint := 0;
+		PointsCam1[Index].MasterPos := 360;
+		PointsCam1[Index].SlavePos := 0;
+		
+		
+		(*Deuxieme serie de point*)
+		Index := 1;
+		PointsCam2[Index].PointIndex := 1;
+		PointsCam2[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM3;
+		PointsCam2[Index].PointType :=  MOTIONPOINTTYPE_REST;
+		PointsCam2[Index].RelIndexNextPoint := 0;
+		PointsCam2[Index].MasterPos := 0;
+		PointsCam2[Index].SlavePos := 0;
+		
+		Index := Index+1;	
+			
+		PointsCam2[Index].PointIndex := 2;
+		PointsCam2[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM3;
+		PointsCam2[Index].PointType :=  MOTIONPOINTTYPE_REST;
+		PointsCam2[Index].RelIndexNextPoint := 0;
+		PointsCam2[Index].MasterPos := 100;
+		PointsCam2[Index].SlavePos := 150;
+		
+		Index := Index+1;	
+			
+		PointsCam2[Index].PointIndex := 3;
+		PointsCam2[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM3;
+		PointsCam2[Index].PointType :=  MOTIONPOINTTYPE_REST;
+		PointsCam2[Index].RelIndexNextPoint := 0;
+		PointsCam2[Index].MasterPos := 106;
+		PointsCam2[Index].SlavePos := 150;
+		
+		Index := Index+1;	
+			
+		PointsCam2[Index].PointIndex := 4;
+		PointsCam2[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM3;
+		PointsCam2[Index].PointType :=  MOTIONPOINTTYPE_REST;
+		PointsCam2[Index].RelIndexNextPoint := 0;
+		PointsCam2[Index].MasterPos := 236;
+		PointsCam2[Index].SlavePos := 0;
+		
+		Index := Index+1;	
+			
+		PointsCam2[Index].PointIndex := 5;
+		PointsCam2[Index].FunctionType := MOTIONFUNCTYPE_POLYNOM3;
+		PointsCam2[Index].PointType :=  MOTIONPOINTTYPE_REST;
+		PointsCam2[Index].RelIndexNextPoint := 0;
+		PointsCam2[Index].MasterPos := 360;
+		PointsCam2[Index].SlavePos := 0;
+		
+					
+		(*Creation - Ecriture de la table 1*)
+		MC_CamTableSelect1.Execute := TRUE;
+		MC_CamTableSelect1.Periodic := TRUE;
+		MC_CamTableSelect1.MasterAbsolute := TRUE;
+		MC_CamTableSelect1.SlaveAbsolute := TRUE;
+		MC_CamTableSelect1.CamTableID := 1;
+
+		(*Creation - Ecriture de la table 2*)
+		MC_CamTableSelect2.Execute := TRUE;
+		MC_CamTableSelect2.Periodic := TRUE;
+		MC_CamTableSelect2.MasterAbsolute := TRUE;
+		MC_CamTableSelect2.SlaveAbsolute := TRUE;
+		MC_CamTableSelect2.CamTableID := 2;
+
+		IF MC_CamTableSelect1.Error OR MC_CamTableSelect2.Error THEN
+			MC_CamTableSelect1.Execute := FALSE;
+			MC_CamTableSelect2.Execute := FALSE;
+			Etape := 101;
+		ELSIF MC_CamTableSelect1.Done AND MC_CamTableSelect2.Done THEN
+			MC_CamTableSelect1.Execute := FALSE;
+			MC_CamTableSelect2.Execute := FALSE;
+			Etape := 1;
+		END_IF
+
+		MC_CamTableSelect1(Master:=Master, Slave:=Slave, CamTable:=CAM1);
+		MC_CamTableSelect2(Master:=Master, Slave:=Slave, CamTable:=CAM2);]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_Power" Id="{59fab0bd-22cc-4733-b038-dfef42270a56}">
+      <Implementation>
+        <ST><![CDATA[(*Power Axes*)
+MC_PowerMaster.Enable := bPowerMaster;
+MC_PowerMaster.Enable_Positive := TRUE;
+MC_PowerMaster.Enable_Negative := TRUE;
+MC_PowerMaster.Override := 100;
+MC_PowerMaster(Axis:=Master);
+
+MC_PowerSlave.Enable := bPowerSlave;
+MC_PowerSlave.Enable_Positive := TRUE;
+MC_PowerSlave.Enable_Negative := TRUE;
+MC_PowerSlave.Override := 100;
+MC_PowerSlave(Axis:=Slave);
+
+(*Lecture etat cam*)
+MC_CamInfo1.Execute := SyncCamOk AND bReadInfoCam;
+MC_CamInfo1.AtMasterPosition := FALSE;
+MC_CamInfo1.MasterPosition := 0;
+MC_CamInfo1(Slave:= Slave);]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ReadMotion" Id="{4b307cf5-bf33-4f21-aa42-f5254e951872}">
+      <Implementation>
+        <ST><![CDATA[// Nombre de points de la CAM
+
+MCReadMotionFunction(
+	Execute:=bReadMotionFunction , 
+	CamTableID:= 1, 
+	PointID:=1 , 
+	NumPoints:=10 , 
+	Done=> , 
+	Busy=> , 
+	Error=> , 
+	ErrorID=> , 
+	NumPointsRead=> vNumPointsRead, 
+	CamTable:= CAM1 );
+	
+// coordonnées du Point de CAM specifie
+MCReadMotionFunctionPoint(
+	Execute:=bReadMotionFunctionPoint, 
+	CamTableID:= 1, 
+	PointID:=2 , 
+	Done=> , 
+	Busy=> , 
+	Error=> , 
+	ErrorID=> , 
+	Point:= vPoint );	
+
+
+// position de l esclave en fct de la position du Maitre
+MCReadCamTableSlaveDynamics(
+	Execute:= bReadCamTableSlaveDynamics, 
+	CamTableID:= 1 , 
+	MasterPosition:= 10 , 
+	Done=> , 
+	Busy=> , 
+	Error=> , 
+	ErrorID=> , 
+	SlavePosition=> fSlavePosition , 
+	SlaveVelocity=> fSlaveVelocity, 
+	SlaveAcceleration=> );
+	
+// position du maitre  en fct de la position de l'esclave
+MCReadCamTableMasterPosition(
+	Execute:= bReadCamTableMasterPosition, 
+	CamTableID:= 1, 
+	SlavePosition:= fSlavePosition, 
+	MasterOffset:= , 
+	SlaveOffset:= , 
+	MasterScaling:= 1.0 , 
+	SlaveScaling:= 1.0, 
+	MasterStartPosition:=0 , 
+	MasterAccuracy:= 0.1, 
+	Done=> , 
+	Busy=> , 
+	Error=> , 
+	ErrorID=> , 
+	MasterLow=> pMasterLow, 
+	MasterHigh=> pMasterHigh);
+	
+
+	
+	]]></ST>
+      </Implementation>
+    </Action>
+  </POU>
+</TcPlcObject>

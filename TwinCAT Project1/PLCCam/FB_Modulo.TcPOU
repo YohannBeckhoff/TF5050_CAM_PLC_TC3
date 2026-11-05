@@ -1,0 +1,101 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4022.7">
+  <POU Name="FB_Modulo" Id="{5dd1c843-b522-45f1-87d0-86be4d7682d7}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Modulo
+VAR_INPUT
+	Execute: BOOL;
+	Modulo: LREAL;
+
+
+END_VAR
+VAR_OUTPUT
+	Done: BOOL;
+	Busy: BOOL;
+	Error: BOOL;
+	ErrorId: INT;
+END_VAR
+VAR_IN_OUT
+	Axe: AXIS_REF;
+END_VAR
+VAR
+	ADSWRITE01: ADSWRITE;
+	Etape: INT;
+	F_Execute: R_Trig;
+	MCWriteBoolParameter: MC_WriteBoolParameter;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[F_Execute(CLK:= Execute, );
+
+IF F_Execute.Q THEN
+	ADSWRITE01(WRITE:= FALSE);
+	MCWriteBoolParameter(	Axis:= Axe, 	Execute:= FALSE);
+	Etape:=1;
+END_IF
+
+CASE Etape OF
+
+1:
+	ADSWRITE01(WRITE:= FALSE);
+
+	Done := FALSE;
+	Busy := TRUE;
+	Error := FALSE;
+	ErrorId :=0;
+	
+	Etape := Etape +1;
+//
+2:
+ADSWRITE01(
+	NETID:='' , 
+	PORT:= 501, 
+	IDXGRP:= 16#5000 + Axe.NcToPlc.AxisId, 
+	IDXOFFS:= 16#09, //Modulo
+	LEN:= SIZEOF(Modulo), 
+	SRCADDR:=  ADR(Modulo), 
+	WRITE:= TRUE , 
+	TMOUT:=  DEFAULT_ADS_TIMEOUT, 
+	BUSY=> , 
+	ERR=> , 
+	ERRID=> );
+
+IF ADSWRITE01.BUSY THEN
+	Etape := Etape +1;
+END_IF
+	
+3:
+	ADSWRITE01(WRITE:= TRUE);
+IF NOT ADSWRITE01.ERR AND NOT ADSWRITE01.BUSY THEN
+	ADSWRITE01(WRITE:= FALSE);
+	Etape := Etape +1;
+END_IF
+IF ADSWRITE01.ERR AND NOT ADSWRITE01.BUSY THEN
+	ADSWRITE01(WRITE:= FALSE);
+	ErrorId :=Etape;
+	Etape := 100;
+END_IF
+//
+
+
+
+4:
+Done := TRUE;
+Busy := FALSE;
+Error := FALSE;
+
+
+100:
+Done := TRUE;
+Busy := FALSE;
+Error := TRUE;
+
+
+	END_CASE]]></ST>
+    </Implementation>
+    <LineIds Name="FB_Modulo">
+      <LineId Id="3" Count="49" />
+      <LineId Id="145" Count="14" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

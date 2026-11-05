@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <GVL Name="GVL_Axe" Id="{154a99d2-2f94-44db-a165-2ec3d84054e2}">
+    <Declaration><![CDATA[
+VAR_GLOBAL
+	AxeTapis : Axis_ref;
+	
+END_VAR
+
+VAR_GLOBAL CONSTANT
+	NbrePointCame: INT :=5;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

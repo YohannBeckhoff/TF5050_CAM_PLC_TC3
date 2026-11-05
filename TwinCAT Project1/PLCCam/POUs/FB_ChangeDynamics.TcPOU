@@ -1,0 +1,103 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="FB_ChangeDynamics" Id="{61709497-8346-4785-ada2-c459c28432e4}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ChangeDynamics
+VAR_INPUT
+	bChangeSpeed:BOOL;
+	lrPos :ARRAY[1..5] OF LREAL;
+	lrNewSpeed: ARRAY[1..5] OF LREAL;
+
+END_VAR
+VAR_OUTPUT
+	bEnd: BOOL;
+END_VAR
+VAR
+	MC_MoveAbsolute1: ARRAY[1..5] OF MC_MoveAbsolute;
+	BufferM: MC_BufferMode := MC_BUFFERMODE.MC_BlendingNext;
+	bGo: ARRAY[1..5] OF  BOOL;
+
+	Etape: INT;
+	R_bChgeSpeed: R_TRIG;
+	i: INT;
+
+END_VAR
+VAR_IN_OUT
+	Axe: Axis_Ref;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[R_bChgeSpeed(CLK:=bChangeSpeed , Q=> );
+IF R_bChgeSpeed.Q THEN
+	Etape := 1;
+	bEnd := FALSE;
+END_IF
+
+CASE Etape OF
+	1:
+	bGo[Etape] := TRUE;  //Move1
+	bGo[Etape+1] := TRUE;	 //Move2
+	IF MC_MoveAbsolute1[Etape].Done THEN
+		Etape := Etape+1;
+	END_IF
+	
+	2: 
+	bGo[Etape+1] := TRUE;	
+	 IF MC_MoveAbsolute1[Etape].Done THEN
+		Etape := Etape+1;
+	END_IF
+	3:
+	bGo[Etape+1] := TRUE;	
+	 IF MC_MoveAbsolute1[Etape].Done THEN
+		Etape := Etape+1;
+	END_IF
+	
+	4: 
+	bGo[Etape+1] := TRUE;	
+	 IF MC_MoveAbsolute1[Etape].Done THEN
+		Etape := Etape+1;
+	END_IF
+	
+	5: // Fin
+		 IF MC_MoveAbsolute1[Etape].Done THEN
+			 	bEnd := TRUE;
+				FOR i:= 1 TO 5 DO
+					bGo[i]:= FALSE;
+				END_FOR
+				
+		 Etape := 0; 
+		 END_IF
+		
+END_CASE
+
+
+	
+FOR i:= 1 TO 5 DO
+	IF i= 1 THEN
+		BufferM :=MC_BUFFERMODE.MC_Aborting;
+	ELSE
+		BufferM :=MC_BUFFERMODE.MC_BlendingNext;
+	END_IF
+	MC_MoveAbsolute1[i](
+		Axis:=Axe , 
+		Execute:=bGo[i],
+		Position:= lrPos[i], 
+		Velocity:=lrNewSpeed[i] , 
+		Acceleration:= , 
+		Deceleration:= , 
+		Jerk:= , 
+		BufferMode:=BufferM , 
+		Options:= , 
+		Done=> , 
+		Busy=> , 
+		Active=> , 
+		CommandAborted=> , 
+		Error=> , 
+		ErrorID=> );
+END_FOR
+]]></ST>
+    </Implementation>
+    <LineIds Name="FB_ChangeDynamics">
+      <LineId Id="3" Count="67" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

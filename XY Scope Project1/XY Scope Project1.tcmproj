@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ProjectGuid>{5aca4df2-6e8c-43fc-be4a-ccc63bce3132}</ProjectGuid>
+    <AssemblyName>XY Scope Project1</AssemblyName>
+    <Name>XY Scope Project1</Name>
+    <RootNamespace>XY Scope Project1</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="XY Scope Project.tcscopex">
+      <SubType>Content</SubType>
+    </Content>
+  </ItemGroup>
+</Project>

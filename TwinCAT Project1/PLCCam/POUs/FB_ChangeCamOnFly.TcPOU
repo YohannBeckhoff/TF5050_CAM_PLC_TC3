@@ -1,0 +1,82 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="FB_ChangeCamOnFly" Id="{329967ef-b2cd-4099-a611-fc467b63fec7}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ChangeCamOnFly
+VAR_INPUT
+	xExecute : BOOL;
+	CAM: MC_CAM_REF;
+	CamTableID : MC_CAM_ID;
+	ActivationMode : MC_CamActivationMode := MC_CamActivationMode.MC_CAMACTIVATION_NEXTCYCLE;
+END_VAR
+VAR_OUTPUT
+	xActive : BOOL;
+	xDone : BOOL;
+	xError : BOOL;
+END_VAR
+VAR
+	iStep : INT;
+	fbWriteMotionFunction 	: MC_WriteMotionFunction;
+	fbSetCamOnlineChangeMode 	: MC_SetCamOnlineChangeMode;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[
+
+
+CASE iStep OF
+	
+	0	:	fbWriteMotionFunction.Execute 	:= FALSE;
+			fbSetCamOnlineChangeMode.Execute 	:= FALSE;
+			xActive := FALSE;
+			
+			IF xExecute THEN
+				xActive := TRUE;
+				xDone := FALSE;
+				iStep := 1;
+			END_IF
+			
+	1	:	
+			fbWriteMotionFunction(PointID := 1, CamTableID := CamTableID,NumPoints := CAM.NoOfRows, CamTable := CAM);
+			fbWriteMotionFunction.Execute 	:= TRUE;
+			IF fbWriteMotionFunction.Done THEN
+				fbWriteMotionFunction.Execute 	:= FALSE;
+				iStep := 2;
+			END_IF
+			IF fbWriteMotionFunction.Error THEN
+				iStep := 99;
+			END_IF
+
+			
+			
+	2	:	fbSetCamOnlineChangeMode(	ActivationMode := ActivationMode, 
+										CamTableID := CamTableID, 
+										MasterScalingMode:=1 , 
+										SlaveScalingMode:=1 );
+			fbSetCamOnlineChangeMode.Execute 	:= TRUE;
+			
+			IF fbSetCamOnlineChangeMode.Done THEN
+				fbSetCamOnlineChangeMode.Execute 	:= FALSE;
+				iStep := 3;
+			END_IF
+			IF fbSetCamOnlineChangeMode.Error THEN
+				iStep := 99;
+			END_IF
+		
+	3	:	xDone := TRUE;
+ 				IF NOT xExecute THEN
+					iStep := 0;
+				END_IF
+				
+	99:
+	
+			IF NOT xExecute THEN
+					iStep := 0;
+			END_IF
+END_CASE]]></ST>
+    </Implementation>
+    <LineIds Name="FB_ChangeCamOnFly">
+      <LineId Id="3" Count="51" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,106 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="FB_Cam_ChgePoints" Id="{7079a489-ee94-406c-9f39-b3ddeee232ce}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Cam_ChgePoints
+VAR_INPUT
+		bChange : BOOL;
+		NumCAM_Index : UDINT;
+END_VAR
+VAR_OUTPUT
+		xError: BOOL;
+		xDone: BOOL;
+END_VAR
+VAR
+
+	EtapeChge: INT;
+	R_TRIGCge: R_TRIG;
+	NumPoints: UDINT;
+	eActivationMode: MC_CamActivationMode := MC_CAMACTIVATIONMODE.MC_CAMACTIVATION_NEXTCYCLE;
+	MC_WriteMotionFunction:	 MC_WriteMotionFunctionPoint;
+	FB_SetCamOnlineChangeMode:  MC_SetCamOnlineChangeMode;
+END_VAR
+VAR_IN_OUT
+	PointsChge: 				ARRAY [*] OF MC_MotionFunctionPoint;
+
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[R_TRIGCge(CLK:=bChange , Q=> );	
+IF R_TRIGCge.Q THEN
+	EtapeChge := 1;
+	xDone := FALSE;
+	xError := FALSE;
+	NumPoints :=1;
+	MC_WriteMotionFunction(Execute:= FALSE, CamTableID:= NumCAM_Index,PointID:=NumPoints,	Point:= PointsChge[NumPoints]  ) ;
+	FB_SetCamOnlineChangeMode(Execute:= FALSE) ;
+
+END_IF
+
+
+CASE EtapeChge OF
+	
+
+1:
+
+	// ecriture du point	
+	MC_WriteMotionFunction(
+		Execute:= TRUE , 
+		CamTableID:= NumCAM_Index, 
+		PointID:=NumPoints , 
+		Done=> , 
+		Busy=> , 
+		Error=> , 
+		ErrorID=> , 
+		Point:= PointsChge[NumPoints]);
+		
+		
+	// changement on ligne		
+	FB_SetCamOnlineChangeMode(
+		Execute:= TRUE, 
+		ActivationMode:= eActivationMode , 
+		ActivationPosition:= 0 , // position du Master
+		MasterScalingMode:=1 , 
+		SlaveScalingMode:=1 , 
+		CamTableID:= NumCAM_Index, 
+		Done=> , 
+		Busy=> , 
+		Error=> , 
+		ErrorID=> );
+	
+	IF MC_WriteMotionFunction.Done AND FB_SetCamOnlineChangeMode.Done THEN
+		EtapeChge := EtapeChge +1;
+	END_IF
+	
+	IF MC_WriteMotionFunction.Error OR FB_SetCamOnlineChangeMode.Error THEN
+		EtapeChge := 10;
+	END_IF
+
+2:
+	MC_WriteMotionFunction(Execute:= FALSE, CamTableID:= NumCAM_Index,PointID:=NumPoints,	Point:= PointsChge[NumPoints]  ) ;
+	FB_SetCamOnlineChangeMode(Execute:= FALSE) ;
+	
+	NumPoints := NumPoints+1;
+	IF NumPoints<=NbrePointCame THEN
+			EtapeChge := 1;
+	ELSE
+			EtapeChge := 3;	
+	END_IF
+
+3:
+
+xDone := TRUE;
+
+
+10: // Error
+xError := TRUE;
+	
+END_CASE]]></ST>
+    </Implementation>
+    <LineIds Name="FB_Cam_ChgePoints">
+      <LineId Id="186" Count="5" />
+      <LineId Id="253" Count="1" />
+      <LineId Id="252" Count="0" />
+      <LineId Id="192" Count="59" />
+      <LineId Id="50" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>
